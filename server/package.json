@@ -1,0 +1,31 @@
+{
+  "name": "quantum-secure-mail-server",
+  "version": "1.0.0",
+  "description": "Backend for Quantum-Secure Email Web Application",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "quantum",
+    "email",
+    "secure",
+    "encryption"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "express-validator": "^7.3.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb-memory-server": "^11.0.1",
+    "mongoose": "^9.4.1",
+    "morgan": "^1.10.1"
+  }
+}
