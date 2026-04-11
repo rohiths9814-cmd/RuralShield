@@ -1,7 +1,31 @@
-import Message from '../models/Message.js';
-import User from '../models/User.js';
+import MessageStore from '../data/messages.js';
+import UserStore from '../data/users.js';
 import ApiError from '../utils/ApiError.js';
 import scamDetectorService from './scamDetector.service.js';
+
+/**
+ * Populate sender/recipient info onto a message object
+ */
+function populateMessage(message, fields = ['username', 'email', 'avatar', 'publicKey']) {
+  const sender = UserStore.findById(message.sender);
+  const recipient = UserStore.findById(message.recipient);
+
+  const pick = (user) => {
+    if (!user) return null;
+    const result = { _id: user._id };
+    if (fields.includes('username')) result.username = user.username;
+    if (fields.includes('email')) result.email = user.email;
+    if (fields.includes('avatar')) result.avatar = UserStore._getAvatar(user);
+    if (fields.includes('publicKey')) result.publicKey = user.publicKey;
+    return result;
+  };
+
+  return {
+    ...message,
+    sender: pick(sender) || message.sender,
+    recipient: pick(recipient) || message.recipient,
+  };
+}
 
 const messageService = {
   /**
@@ -9,20 +33,20 @@ const messageService = {
    */
   async sendMessage({ senderId, recipientEmail, subject, body }) {
     // Find recipient by email
-    const recipient = await User.findOne({ email: recipientEmail });
+    const recipient = UserStore.findByEmail(recipientEmail);
 
     if (!recipient) {
       throw ApiError.notFound(`No user found with email: ${recipientEmail}`);
     }
 
-    if (recipient._id.toString() === senderId.toString()) {
+    if (recipient._id === senderId) {
       throw ApiError.badRequest('Cannot send a message to yourself');
     }
 
     // Run AI scam analysis
     const scamAnalysis = scamDetectorService.analyze(subject, body);
 
-    const message = await Message.create({
+    const message = MessageStore.create({
       sender: senderId,
       recipient: recipient._id,
       subject,
@@ -31,43 +55,18 @@ const messageService = {
     });
 
     // Populate sender and recipient for response
-    await message.populate([
-      { path: 'sender', select: 'username email avatar' },
-      { path: 'recipient', select: 'username email avatar' },
-    ]);
-
-    return message;
+    return populateMessage(message);
   },
 
   /**
    * Get inbox messages (paginated)
    */
   async getInbox(userId, { page = 1, limit = 20 }) {
-    const skip = (page - 1) * limit;
-
-    const [messages, total] = await Promise.all([
-      Message.find({
-        recipient: userId,
-        deletedByRecipient: false,
-      })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate('sender', 'username email avatar'),
-      Message.countDocuments({
-        recipient: userId,
-        deletedByRecipient: false,
-      }),
-    ]);
+    const result = MessageStore.getInbox(userId, { page, limit });
 
     return {
-      messages,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      },
+      messages: result.messages.map(m => populateMessage(m, ['username', 'email', 'avatar'])),
+      pagination: result.pagination,
     };
   },
 
@@ -75,31 +74,11 @@ const messageService = {
    * Get sent messages (paginated)
    */
   async getSent(userId, { page = 1, limit = 20 }) {
-    const skip = (page - 1) * limit;
-
-    const [messages, total] = await Promise.all([
-      Message.find({
-        sender: userId,
-        deletedBySender: false,
-      })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate('recipient', 'username email avatar'),
-      Message.countDocuments({
-        sender: userId,
-        deletedBySender: false,
-      }),
-    ]);
+    const result = MessageStore.getSent(userId, { page, limit });
 
     return {
-      messages,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      },
+      messages: result.messages.map(m => populateMessage(m, ['username', 'email', 'avatar'])),
+      pagination: result.pagination,
     };
   },
 
@@ -107,17 +86,15 @@ const messageService = {
    * Get a single message by ID
    */
   async getMessage(messageId, userId) {
-    const message = await Message.findById(messageId)
-      .populate('sender', 'username email avatar publicKey')
-      .populate('recipient', 'username email avatar publicKey');
+    const message = MessageStore.findById(messageId);
 
     if (!message) {
       throw ApiError.notFound('Message not found');
     }
 
     // Authorization: only sender or recipient can view
-    const isSender = message.sender._id.toString() === userId.toString();
-    const isRecipient = message.recipient._id.toString() === userId.toString();
+    const isSender = message.sender === userId;
+    const isRecipient = message.recipient === userId;
 
     if (!isSender && !isRecipient) {
       throw ApiError.forbidden('You do not have access to this message');
@@ -131,66 +108,66 @@ const messageService = {
       throw ApiError.notFound('Message not found');
     }
 
-    return message;
+    return populateMessage(message);
   },
 
   /**
    * Mark message as read
    */
   async markAsRead(messageId, userId) {
-    const message = await Message.findById(messageId);
+    const message = MessageStore.findById(messageId);
 
     if (!message) {
       throw ApiError.notFound('Message not found');
     }
 
     // Only recipient can mark as read
-    if (message.recipient.toString() !== userId.toString()) {
+    if (message.recipient !== userId) {
       throw ApiError.forbidden('Only the recipient can mark messages as read');
     }
 
     message.read = true;
-    await message.save();
+    MessageStore.save(message);
 
-    return message;
+    return populateMessage(message);
   },
 
   /**
    * Toggle star on message
    */
   async toggleStar(messageId, userId) {
-    const message = await Message.findById(messageId);
+    const message = MessageStore.findById(messageId);
 
     if (!message) {
       throw ApiError.notFound('Message not found');
     }
 
     // Both sender and recipient can star
-    const isSender = message.sender.toString() === userId.toString();
-    const isRecipient = message.recipient.toString() === userId.toString();
+    const isSender = message.sender === userId;
+    const isRecipient = message.recipient === userId;
 
     if (!isSender && !isRecipient) {
       throw ApiError.forbidden('You do not have access to this message');
     }
 
     message.starred = !message.starred;
-    await message.save();
+    MessageStore.save(message);
 
-    return message;
+    return populateMessage(message);
   },
 
   /**
    * Soft delete a message
    */
   async deleteMessage(messageId, userId) {
-    const message = await Message.findById(messageId);
+    const message = MessageStore.findById(messageId);
 
     if (!message) {
       throw ApiError.notFound('Message not found');
     }
 
-    const isSender = message.sender.toString() === userId.toString();
-    const isRecipient = message.recipient.toString() === userId.toString();
+    const isSender = message.sender === userId;
+    const isRecipient = message.recipient === userId;
 
     if (!isSender && !isRecipient) {
       throw ApiError.forbidden('You do not have access to this message');
@@ -203,7 +180,7 @@ const messageService = {
       message.deletedByRecipient = true;
     }
 
-    await message.save();
+    MessageStore.save(message);
 
     return { message: 'Message deleted successfully' };
   },
@@ -212,27 +189,21 @@ const messageService = {
    * Get unread count for a user
    */
   async getUnreadCount(userId) {
-    const count = await Message.countDocuments({
-      recipient: userId,
-      read: false,
-      deletedByRecipient: false,
-    });
-
-    return count;
+    return MessageStore.countUnread(userId);
   },
 
   /**
    * Re-analyze a message for scam content
    */
   async reanalyzeMessage(messageId, userId) {
-    const message = await Message.findById(messageId);
+    const message = MessageStore.findById(messageId);
 
     if (!message) {
       throw ApiError.notFound('Message not found');
     }
 
-    const isSender = message.sender.toString() === userId.toString();
-    const isRecipient = message.recipient.toString() === userId.toString();
+    const isSender = message.sender === userId;
+    const isRecipient = message.recipient === userId;
 
     if (!isSender && !isRecipient) {
       throw ApiError.forbidden('You do not have access to this message');
@@ -241,9 +212,9 @@ const messageService = {
     // Re-run AI scam analysis
     const scamAnalysis = scamDetectorService.analyze(message.subject, message.body);
     message.scamAnalysis = scamAnalysis;
-    await message.save();
+    MessageStore.save(message);
 
-    return message;
+    return populateMessage(message);
   },
 };
 

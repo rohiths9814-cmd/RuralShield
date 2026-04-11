@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import UserStore from '../data/users.js';
 import ApiError from '../utils/ApiError.js';
 import env from '../config/env.js';
 
@@ -26,14 +26,14 @@ const auth = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, env.JWT_SECRET);
 
-    // Find user
-    const user = await User.findById(decoded.userId);
+    // Find user in memory store
+    const user = UserStore.findById(decoded.userId);
 
     if (!user) {
       throw ApiError.unauthorized('User not found. Token may be invalid.');
     }
 
-    // Attach user to request
+    // Attach user to request (without password)
     req.user = user;
     next();
   } catch (error) {

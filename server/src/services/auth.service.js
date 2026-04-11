@@ -1,69 +1,30 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
-import keyService from './key.service.js';
+import UserStore from '../data/users.js';
 import ApiError from '../utils/ApiError.js';
 import env from '../config/env.js';
 
 const authService = {
   /**
-   * Register a new user
-   * Generates RSA keypair, stores public key, returns private key to user
+   * Register — disabled in demo mode (users are hardcoded)
    */
   async register({ username, email, password }) {
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ email }, { username }],
-    });
-
-    if (existingUser) {
-      if (existingUser.email === email) {
-        throw ApiError.conflict('Email already registered');
-      }
-      throw ApiError.conflict('Username already taken');
-    }
-
-    // Generate key pair
-    const { publicKey, privateKey } = keyService.generateKeyPair();
-
-    // Create user
-    const user = await User.create({
-      username,
-      email,
-      password,
-      publicKey,
-    });
-
-    // Generate JWT
-    const token = this.generateToken(user._id);
-
-    return {
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        publicKey: user.publicKey,
-        avatar: user.getAvatar(),
-        createdAt: user.createdAt,
-      },
-      // Private key returned ONCE — user must save it
-      privateKey,
-    };
+    throw ApiError.badRequest(
+      'Registration is disabled in demo mode. Please use one of the 10 pre-created accounts. Email: alice@securemail.com, Password: Password1'
+    );
   },
 
   /**
    * Login an existing user
    */
   async login({ email, password }) {
-    // Find user with password field
-    const user = await User.findOne({ email }).select('+password');
+    const user = UserStore.findByEmailWithPassword(email);
 
     if (!user) {
       throw ApiError.unauthorized('Invalid email or password');
     }
 
     // Compare password
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await UserStore.comparePassword(user, password);
 
     if (!isMatch) {
       throw ApiError.unauthorized('Invalid email or password');
@@ -79,7 +40,7 @@ const authService = {
         username: user.username,
         email: user.email,
         publicKey: user.publicKey,
-        avatar: user.getAvatar(),
+        avatar: UserStore._getAvatar(user),
         createdAt: user.createdAt,
       },
     };
@@ -89,7 +50,7 @@ const authService = {
    * Get current user profile
    */
   async getMe(userId) {
-    const user = await User.findById(userId);
+    const user = UserStore.findById(userId);
 
     if (!user) {
       throw ApiError.notFound('User not found');
@@ -100,7 +61,7 @@ const authService = {
       username: user.username,
       email: user.email,
       publicKey: user.publicKey,
-      avatar: user.getAvatar(),
+      avatar: UserStore._getAvatar(user),
       createdAt: user.createdAt,
     };
   },

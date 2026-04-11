@@ -1,11 +1,9 @@
 import app from './src/app.js';
-import connectDB from './src/config/db.js';
 import env from './src/config/env.js';
 
 const startServer = async () => {
   try {
-    // Connect to MongoDB
-    await connectDB();
+    // No database needed — using in-memory storage with hardcoded users
 
     // Start HTTP server
     const server = app.listen(env.PORT, () => {
@@ -15,6 +13,7 @@ const startServer = async () => {
 ║──────────────────────────────────────────────────║
 ║  Port:        ${String(env.PORT).padEnd(35)}║
 ║  Environment: ${String(env.NODE_ENV).padEnd(35)}║
+║  Storage:     In-Memory (10 demo users)${' '.repeat(10)}║
 ║  API URL:     http://localhost:${String(env.PORT).padEnd(19)}║
 ╚══════════════════════════════════════════════════╝
       `);
