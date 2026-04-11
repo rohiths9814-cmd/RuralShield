@@ -99,11 +99,27 @@ async function getAvailablePort(desiredPort) {
 const connectDB = async () => {
   let uri = env.MONGODB_URI;
 
+  // ── Production: connect directly to the configured URI (Atlas) ──
+  if (env.NODE_ENV === 'production') {
+    try {
+      const conn = await mongoose.connect(uri, {
+        maxPoolSize: 10,
+        serverSelectionTimeoutMS: 10000,
+      });
+      console.log(`✅ MongoDB connected: ${conn.connection.host}`);
+      setupListeners();
+      return conn;
+    } catch (error) {
+      console.error('❌ Failed to connect to MongoDB:', error.message);
+      process.exit(1);
+    }
+  }
+
+  // ── Development: try configured URI first, then fall back to local mongod ──
   try {
-    // First, try connecting to the configured MongoDB URI
     const conn = await mongoose.connect(uri, {
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000, // Fail fast if not reachable
+      serverSelectionTimeoutMS: 5000,
     });
 
     console.log(`✅ MongoDB connected: ${conn.connection.host}`);
@@ -114,14 +130,10 @@ const connectDB = async () => {
     console.log('🔄 Starting local persistent MongoDB (development mode)...');
 
     try {
-      // Create a persistent data directory inside the server folder
       const dbPath = resolve(__dirname, '..', '..', 'data', 'db');
       mkdirSync(dbPath, { recursive: true });
 
-      // Find an available port for the standalone mongod
       const port = await getAvailablePort(27018);
-
-      // Start a standalone mongod with WiredTiger persistence
       const { process: mongodProcess } = await startStandaloneMongod(dbPath, port);
 
       uri = `mongodb://127.0.0.1:${port}/quantum-secure-mail`;
@@ -135,7 +147,6 @@ const connectDB = async () => {
       console.log('✅ User data WILL persist across server restarts.');
       setupListeners();
 
-      // Graceful shutdown — kill the mongod process
       const shutdown = () => {
         if (mongodProcess && !mongodProcess.killed) {
           mongodProcess.kill('SIGTERM');
